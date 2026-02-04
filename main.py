@@ -4,7 +4,7 @@ import json
 import csv
 from pathlib import Path
 import mysql.connector
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 
 # ---------- APP ----------
 app = FastAPI(title="Hotel Review Analysis POC")
@@ -13,7 +13,7 @@ app = FastAPI(title="Hotel Review Analysis POC")
 DB_CONFIG = {
     "host": "localhost",
     "user": "root",
-    "password": "heyimlearning12",
+    "password": "heyimlearning12", 
     "database": "review_poc"
 }
 
@@ -79,6 +79,31 @@ def analyze_review_logic(review: dict) -> dict:
         "summary": summary
     }
 
+# ---------- READ INPUT FILES (JSON / CSV / JSONL) ----------
+def read_reviews(input_path: Path, input_format: str):
+    reviews = []
+
+    if input_format == "jsonl":
+        with open(input_path, "r", encoding="utf-8") as f:
+            for line in f:
+                reviews.append(json.loads(line))
+
+    elif input_format == "json":
+        with open(input_path, "r", encoding="utf-8") as f:
+            reviews = json.load(f)
+
+    elif input_format == "csv":
+        with open(input_path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                row["rating"] = int(row["rating"])
+                reviews.append(row)
+
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported input format")
+
+    return reviews
+
 # ---------- MYSQL INSERT ----------
 def insert_into_mysql(rows: list):
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -113,23 +138,28 @@ def insert_into_mysql(rows: list):
 def health_check():
     return {"status": "ok"}
 
-# ---------- SINGLE REVIEW ----------
+# ---------- ANALYZE SINGLE REVIEW ----------
 @app.post("/reviews/analyze-one")
 def analyze_one(review: dict):
     return analyze_review_logic(review)
 
-# ---------- BULK ANALYSIS ----------
+# ---------- ANALYZE BULK REVIEWS ----------
 @app.post("/reviews/analyze-bulk")
-def analyze_bulk():
-    input_path = Path("data/reviews_raw.jsonl")
+def analyze_bulk(
+    hotel_id: str,
+    input_format: str,
+    input_path: str
+):
+    input_path = Path(input_path)
     output_path = Path("output/reviews_enriched.csv")
 
-    results = []
+    raw_reviews = read_reviews(input_path, input_format)
 
-    with open(input_path, "r", encoding="utf-8") as f:
-        for line in f:
-            review = json.loads(line)
-            results.append(analyze_review_logic(review))
+    results = []
+    for review in raw_reviews:
+        review["hotel_id"] = hotel_id
+        enriched = analyze_review_logic(review)
+        results.append(enriched)
 
     insert_into_mysql(results)
 
@@ -150,18 +180,20 @@ def summary_report():
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor(dictionary=True)
 
-    cursor.execute("SELECT COUNT(*) as total FROM reviews_enriched")
+    cursor.execute("SELECT COUNT(*) AS total FROM reviews_enriched")
     total = cursor.fetchone()["total"]
 
     cursor.execute("""
-        SELECT publish_decision, COUNT(*) as count
-        FROM reviews_enriched GROUP BY publish_decision
+        SELECT publish_decision, COUNT(*) AS count
+        FROM reviews_enriched
+        GROUP BY publish_decision
     """)
     publish_stats = cursor.fetchall()
 
     cursor.execute("""
-        SELECT sentiment, COUNT(*) as count
-        FROM reviews_enriched GROUP BY sentiment
+        SELECT sentiment, COUNT(*) AS count
+        FROM reviews_enriched
+        GROUP BY sentiment
     """)
     sentiment_stats = cursor.fetchall()
 
@@ -174,5 +206,7 @@ def summary_report():
         "sentiment_stats": sentiment_stats
     }
 
+
   
+
       
