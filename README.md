@@ -30,3 +30,8 @@ It simulates how real hotel reviews are:
 ```bash
 pip install fastapi uvicorn mysql-connector-python
 python -m uvicorn main:app --reload
+
+
+- Supports bulk analysis from JSON, CSV, and JSONL files
+- Stores analyzed reviews in MySQL
+- Provides summary statistics via /reports/summary API
